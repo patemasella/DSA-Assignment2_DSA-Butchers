@@ -23,7 +23,7 @@ Kafka brokers, MongoDB/SQL, and Docker assets are intentionally omitted at this 
 The following work packages are organised by priority. Owners are responsible for driving their package and coordinating cross-cutting tasks.
 
 ### Iteration 1: Foundations
-- Treasure Kamwi
+- Patemasella Gawanas
   - Stand up Kafka locally and define topics; document event schemas.
   - Create Docker Compose baseline with Kafka, ZooKeeper, MongoDB/SQL.
 - Tinomudaishe Ndhlovu
@@ -35,7 +35,7 @@ The following work packages are organised by priority. Owners are responsible fo
 - Kavangere Ngozu
   - Implement Transport Service REST endpoints plus schedule publication via Kafka.
   - Produce seed data scripts for routes and trips.
-- Patemasella Gawanas
+- Treasure Kamwi
   - Develop Ticketing Service workflow and Kafka consumers/producers.
   - Coordinate ticket state machine and error handling strategy.
 - Reinholdt T Ndjendja
@@ -52,3 +52,4 @@ The following work packages are organised by priority. Owners are responsible fo
 - ☐ Deployment assets (Docker Compose/K8s) and documentation.
 - ☐ Automated tests covering services and event flows.
 - ☐ Final presentation deck and demo script.
+
