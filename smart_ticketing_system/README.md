@@ -24,7 +24,7 @@ The following work packages are organised by priority. Owners are responsible fo
 
 ### Iteration 1: Foundations
 - Patemasella Gawanas
-  - Stand up Kafka locally and define topics; document event schemas.
+  - Set up Kafka locally and define topics; document event schemas.
   - Create Docker Compose baseline with Kafka, ZooKeeper, MongoDB/SQL.
 - Tinomudaishe Ndhlovu
   - Design database schemas for passengers, trips, tickets, and payments.
@@ -52,4 +52,5 @@ The following work packages are organised by priority. Owners are responsible fo
 - ☐ Deployment assets (Docker Compose/K8s) and documentation.
 - ☐ Automated tests covering services and event flows.
 - ☐ Final presentation deck and demo script.
+
 
