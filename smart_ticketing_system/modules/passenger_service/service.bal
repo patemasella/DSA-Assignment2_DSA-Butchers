@@ -2,41 +2,112 @@
 module smart_ticketing_system.passenger_service;
 
 import ballerina/http;
+
 import ballerina/mongo;
+
 import ballerina/auth;
+
 import ballerina/jwt;
+
 import ballerina/time;
+
 import ballerina/log;
+
 import ballerina/uuid;
-import ballerina/io;
 
-// Database configuration
-final mongo:Client passengerDB = check new ("mongodb://admin:password@localhost:27017",
-    database = "smart_ticketing",
-    collection = "passengers");
+import ballerina/crypto;
 
-final mongo:Client ticketDB = check new ("mongodb://admin:password@localhost:27017",
-    database = "smart_ticketing", 
-    collection = "tickets");
+import ballerina/encoding;
+
+import ballerina/regex;
+
+
+
+configurable string passengerDbUri = "mongodb://admin:password@localhost:27017";
+
+configurable string passengerDbName = "smart_ticketing";
+
+configurable string passengersCollection = "passengers";
+
+configurable string ticketsCollection = "tickets";
+
+configurable int accessTokenTtlSeconds = 3600;
+
+configurable string jwtKeyFilePath = "./resources/private.key";
+
+configurable string jwtCertFilePath = "./resources/public.crt";
+
+
+
+final regex:RegExp EMAIL_PATTERN = re "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$";
+
+final regex:RegExp PHONE_PATTERN = re "^[0-9+][0-9\\s-]{6,}$";
+
+const int MIN_PASSWORD_LENGTH = 8;
+
+
+
+final mongo:Client? passengerDB = initMongoClient(passengersCollection);
+
+final mongo:Client? ticketDB = initMongoClient(ticketsCollection);
+
+
 
 // JWT configuration for authentication
+
 final jwt:IssuerConfig jwtConfig = {
+
     issuer: "smart-ticketing-system",
+
     audience: "passengers",
+
     signatureConfig: {
+
         config: {
-            keyFile: "./resources/private.key"
+
+            keyFile: jwtKeyFilePath
+
         }
+
     }
+
 };
 
+
+
 final auth:JwtValidatorConfig jwtValidatorConfig = {
+
     issuer: "smart-ticketing-system",
+
     audience: "passengers",
+
     signatureConfig: {
-        certFile: "./resources/public.crt"
+
+        certFile: jwtCertFilePath
+
     }
+
 };
+
+
+
+function initMongoClient(string collection) returns mongo:Client? {
+
+    mongo:Client|error result = new (passengerDbUri, database = passengerDbName, collection = collection);
+
+    if result is mongo:Client {
+
+        return result;
+
+    }
+
+    log:printError("Failed to connect to MongoDB collection", 'error = result, collection = collection);
+
+    return ();
+
+}
+
+
 
 // Type definitions
 public type Passenger record {|
@@ -112,24 +183,132 @@ public type Trip record {|
 
 // Utility functions
 function hashPassword(string password) returns string {
-    // In production, use proper hashing like bcrypt
-    return password; // Replace with actual hashing
+
+    byte[] hash = crypto:hashSha256(password.toBytes());
+
+    return encoding:byteArrayToHexString(hash);
+
 }
+
+
 
 function verifyPassword(string plainPassword, string hashedPassword) returns boolean {
     return hashPassword(plainPassword) == hashedPassword;
 }
 
 function generateJwt(string passengerId) returns string|error {
+
+    time:Utc issuedAt = time:utcNow();
+
+    time:Utc expiresAt = time:utcAddSeconds(issuedAt, accessTokenTtlSeconds);
+
     jwt:Payload payload = {
+
         issuer: jwtConfig.issuer,
+
         audience: jwtConfig.audience,
+
         subject: passengerId,
-        issuedAt: time:utcNow().time,
-        expTime: time:utcAddSeconds(time:utcNow(), 3600).time // 1 hour
+
+        issuedAt: issuedAt.time,
+
+        expTime: expiresAt.time
+
     };
+
     return jwt:encode(payload, jwtConfig.signatureConfig);
+
 }
+
+
+
+function validateRegistration(PassengerRegistration registration) returns string? {
+
+    if registration.firstName.trim().isEmpty() {
+
+        return "First name is required";
+
+    }
+
+    if registration.lastName.trim().isEmpty() {
+
+        return "Last name is required";
+
+    }
+
+    string email = registration.email.trim();
+
+    if email.isEmpty() {
+
+        return "Email address is required";
+
+    }
+
+    if !regex:matches(email, EMAIL_PATTERN) {
+
+        return "Invalid email address";
+
+    }
+
+    string phone = registration.phone.trim();
+
+    if phone.isEmpty() {
+
+        return "Phone number is required";
+
+    }
+
+    if !regex:matches(phone, PHONE_PATTERN) {
+
+        return "Invalid phone number";
+
+    }
+
+    string password = registration.password.trim();
+
+    if password.length() < MIN_PASSWORD_LENGTH {
+
+        return "Password must be at least 8 characters long";
+
+    }
+
+    return ();
+
+}
+
+
+
+function validateLogin(LoginRequest loginReq) returns string? {
+
+    string email = loginReq.email.trim();
+
+    if email.isEmpty() {
+
+        return "Email address is required";
+
+    }
+
+    if !regex:matches(email, EMAIL_PATTERN) {
+
+        return "Invalid email address";
+
+    }
+
+    if loginReq.password.trim().isEmpty() {
+
+        return "Password is required";
+
+    }
+
+    return ();
+
+}
+
+
+
+
+
+
 
 // Authentication middleware
 class PassengerAuthHandler {
@@ -168,8 +347,8 @@ listener http:Listener passengerListener = new (9090, {
     },
     secureSocket: {
         key: {
-            certFile: "./resources/public.crt",
-            keyFile: "./resources/private.key"
+            certFile: jwtCertFilePath,
+            keyFile: jwtKeyFilePath
         }
     }
 });
@@ -177,226 +356,535 @@ listener http:Listener passengerListener = new (9090, {
 service /passengers on passengerListener {
 
     // Public endpoint - passenger registration
-    resource function post register(@http:Payload PassengerRegistration registration) 
+    resource function post register(@http:Payload PassengerRegistration registration)
+
     returns json|http:BadRequest|http:InternalServerError {
-        
-        // Validate input
-        if registration.firstName == "" || registration.lastName == "" || 
-           registration.email == "" || registration.password == "" {
-            return http:BAD_REQUEST;
+
+        string? validationError = validateRegistration(registration);
+
+        if validationError is string {
+
+            return prepareErrorResponse(http:BAD_REQUEST, validationError);
+
         }
 
-        // Check if email already exists
-        stream<Passenger, error?> existingPassenger = check passengerDB->find(
-            `{"email": "${registration.email}"}`, Passenger
-        );
-        
-        int count = 0;
-        foreach var passenger in existingPassenger {
-            count += 1;
-        }
-        
-        if count > 0 {
-            return prepareErrorResponse(http:BAD_REQUEST, "Email already registered");
+
+
+        if passengerDB is () {
+
+            log:printError("Passenger database client unavailable");
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Passenger store is currently unavailable");
+
         }
 
-        // Create new passenger
-        string passengerId = uuid:createType1AsString();
-        string currentTime = time:utcToString(time:utcNow());
-        
-        Passenger newPassenger = {
-            id: passengerId,
-            firstName: registration.firstName,
-            lastName: registration.lastName,
-            email: registration.email,
-            phone: registration.phone,
-            passwordHash: hashPassword(registration.password),
-            balance: 0.0,
-            status: "ACTIVE",
-            createdAt: currentTime,
-            updatedAt: currentTime
-        };
 
-        // Save to database
-        _ = check passengerDB->insert(newPassenger);
-        
-        log:printInfo("Passenger registered successfully", passengerId = passengerId);
-        
-        return {
-            id: passengerId,
-            message: "Passenger registered successfully",
-            status: "ACTIVE"
-        };
-    }
 
-    // Public endpoint - passenger login
-    resource function post login(@http:Payload LoginRequest loginReq) 
-    returns LoginResponse|http:Unauthorized|http:InternalServerError {
-        
-        // Find passenger by email
-        stream<Passenger, error?> result = check passengerDB->find(
-            `{"email": "${loginReq.email}"}`, Passenger
-        );
-        
-        Passenger? passenger = ();
-        foreach var p in result {
-            passenger = p;
+        string firstName = registration.firstName.trim();
+
+        string lastName = registration.lastName.trim();
+
+        string email = registration.email.trim().toLowerAscii();
+
+        string phone = registration.phone.trim();
+
+        string password = registration.password.trim();
+
+
+
+        var existingResult = passengerDB->find(`{"email": "${email}"}`, Passenger);
+
+        if existingResult is error {
+
+            log:printError("Failed to query passenger store", 'error = existingResult);
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Unable to verify passenger uniqueness");
+
+        }
+
+
+
+        boolean emailExists = false;
+
+        foreach var passenger in existingResult {
+
+            emailExists = true;
+
             break;
+
         }
-        
+
+
+
+        if emailExists {
+
+            return prepareErrorResponse(http:BAD_REQUEST, "Email already registered");
+
+        }
+
+
+
+        string passengerId = uuid:createType1AsString();
+
+        string currentTime = time:utcToString(time:utcNow());
+
+        Passenger newPassenger = {
+
+            id: passengerId,
+
+            firstName: firstName,
+
+            lastName: lastName,
+
+            email: email,
+
+            phone: phone,
+
+            passwordHash: hashPassword(password),
+
+            balance: 0.0,
+
+            status: "ACTIVE",
+
+            createdAt: currentTime,
+
+            updatedAt: currentTime
+
+        };
+
+
+
+        var insertResult = passengerDB->insert(newPassenger);
+
+        if insertResult is error {
+
+            log:printError("Failed to insert passenger", 'error = insertResult);
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Could not complete registration");
+
+        }
+
+
+
+        log:printInfo("Passenger registered successfully", passengerId = passengerId);
+
+
+
+        return {
+
+            id: passengerId,
+
+            message: "Passenger registered successfully",
+
+            status: "ACTIVE"
+
+        };
+
+    }
+
+
+
+    resource function post login(@http:Payload LoginRequest loginReq)
+
+    returns LoginResponse|http:Unauthorized|http:InternalServerError {
+
+        string? validationError = validateLogin(loginReq);
+
+        if validationError is string {
+
+            return prepareErrorResponse(http:BAD_REQUEST, validationError);
+
+        }
+
+
+
+        if passengerDB is () {
+
+            log:printError("Passenger database client unavailable");
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Passenger store is currently unavailable");
+
+        }
+
+
+
+        string email = loginReq.email.trim().toLowerAscii();
+
+        var result = passengerDB->find(`{"email": "${email}"}`, Passenger);
+
+        if result is error {
+
+            log:printError("Failed to query passenger store for login", 'error = result);
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Unable to process login");
+
+        }
+
+
+
+        Passenger? passenger = ();
+
+        foreach var p in result {
+
+            passenger = p;
+
+            break;
+
+        }
+
+
+
         if passenger is () {
+
             return http:UNAUTHORIZED;
+
         }
-        
-        // Verify password
+
+
+
         if !verifyPassword(loginReq.password, passenger.passwordHash) {
+
             return http:UNAUTHORIZED;
+
         }
-        
-        // Check if passenger is active
+
+
+
         if passenger.status != "ACTIVE" {
+
             return prepareErrorResponse(http:UNAUTHORIZED, "Account is not active");
+
         }
-        
-        // Generate JWT token
+
+
+
         string accessToken = check generateJwt(passenger.id);
-        
-        // Create profile response
+
         PassengerProfile profile = {
+
             id: passenger.id,
+
             firstName: passenger.firstName,
+
             lastName: passenger.lastName,
+
             email: passenger.email,
+
             phone: passenger.phone,
+
             balance: passenger.balance,
+
             status: passenger.status,
+
             createdAt: passenger.createdAt
+
         };
-        
+
+
+
         log:printInfo("Passenger logged in successfully", passengerId = passenger.id);
-        
+
+
+
         return {
+
             accessToken: accessToken,
-            expiresIn: 3600,
+
+            expiresIn: accessTokenTtlSeconds,
+
             passenger: profile
+
         };
+
     }
 
-    // Protected endpoint - get passenger profile
-    resource function get profiles/[string id]() 
+
+
+    resource function get profiles/[string id]()
+
     returns PassengerProfile|http:NotFound|http:Forbidden|http:InternalServerError {
-        
+
         string|error passengerId = getCallerPassengerId();
+
         if passengerId is error || passengerId != id {
+
             return http:FORBIDDEN;
+
         }
-        
-        // Find passenger by ID
-        Passenger? passenger = check passengerDB->findById(id, Passenger);
-        
+
+
+
+        if passengerDB is () {
+
+            log:printError("Passenger database client unavailable");
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Passenger store is currently unavailable");
+
+        }
+
+
+
+        var findResult = passengerDB->findById(id, Passenger);
+
+        if findResult is error {
+
+            log:printError("Failed to retrieve passenger profile", 'error = findResult, passengerId = id);
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Unable to load passenger profile");
+
+        }
+
+
+
+        Passenger? passenger = findResult;
+
         if passenger is () {
+
             return http:NOT_FOUND;
+
         }
-        
+
+
+
         return {
+
             id: passenger.id,
+
             firstName: passenger.firstName,
+
             lastName: passenger.lastName,
+
             email: passenger.email,
+
             phone: passenger.phone,
+
             balance: passenger.balance,
+
             status: passenger.status,
+
             createdAt: passenger.createdAt
+
         };
+
     }
 
-    // Protected endpoint - get passenger tickets
-    resource function get tickets/[string id]() 
+
+
+    resource function get tickets/[string id]()
+
     returns Ticket[]|http:NotFound|http:Forbidden|http:InternalServerError {
-        
+
         string|error passengerId = getCallerPassengerId();
+
         if passengerId is error || passengerId != id {
+
             return http:FORBIDDEN;
+
         }
-        
-        // Verify passenger exists
-        Passenger? passenger = check passengerDB->findById(id, Passenger);
-        if passenger is () {
+
+
+
+        if passengerDB is () || ticketDB is () {
+
+            log:printError("Database client unavailable when loading tickets", passengerId = id);
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Ticket store is currently unavailable");
+
+        }
+
+
+
+        var passengerResult = passengerDB->findById(id, Passenger);
+
+        if passengerResult is error {
+
+            log:printError("Failed to verify passenger existence", 'error = passengerResult, passengerId = id);
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Unable to load tickets");
+
+        }
+
+        if passengerResult is () {
+
             return http:NOT_FOUND;
+
         }
-        
-        // Find tickets for this passenger
-        stream<Ticket, error?> ticketsStream = check ticketDB->find(
-            `{"passengerId": "${id}"}`, Ticket
-        );
-        
+
+
+
+        var ticketsStreamResult = ticketDB->find(`{"passengerId": "${id}"}`, Ticket);
+
+        if ticketsStreamResult is error {
+
+            log:printError("Failed to query tickets", 'error = ticketsStreamResult, passengerId = id);
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Unable to load tickets");
+
+        }
+
+
+
         Ticket[] tickets = [];
-        foreach var ticket in ticketsStream {
+
+        foreach var ticket in ticketsStreamResult {
+
             tickets.push(ticket);
+
         }
-        
-        // Sort by purchase time (newest first)
+
+
+
         tickets.sort(sortTicketsByPurchaseTime);
-        
-        log:printInfo("Retrieved passenger tickets", 
-            passengerId = id, 
-            ticketCount = tickets.length().toString()
-        );
-        
+
+
+
+        log:printInfo("Retrieved passenger tickets", passengerId = id, ticketCount = tickets.length().toString());
+
+
+
         return tickets;
+
     }
 
-    // Protected endpoint - update passenger profile
-    resource function put profiles/[string id](@http:Payload {|
+
+
+    resource function put profiles/[string id](@http:Payload {
+
         string? firstName;
+
         string? lastName;
+
         string? phone;
+
     |} updates) returns PassengerProfile|http:NotFound|http:Forbidden|http:InternalServerError {
-        
+
         string|error passengerId = getCallerPassengerId();
+
         if passengerId is error || passengerId != id {
+
             return http:FORBIDDEN;
+
         }
-        
-        // Find existing passenger
-        Passenger? existingPassenger = check passengerDB->findById(id, Passenger);
+
+
+
+        if passengerDB is () {
+
+            log:printError("Passenger database client unavailable");
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Passenger store is currently unavailable");
+
+        }
+
+
+
+        var existingPassengerResult = passengerDB->findById(id, Passenger);
+
+        if existingPassengerResult is error {
+
+            log:printError("Failed to retrieve passenger for update", 'error = existingPassengerResult, passengerId = id);
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Unable to update profile");
+
+        }
+
+
+
+        Passenger? existingPassenger = existingPassengerResult;
+
         if existingPassenger is () {
+
             return http:NOT_FOUND;
+
         }
-        
-        // Build update document
+
+
+
         json updateDoc = {};
-        if updates.firstName is () {} else {
-            updateDoc.firstName = updates.firstName;
+
+        if updates.firstName is string firstNameUpdate {
+
+            updateDoc.firstName = firstNameUpdate.trim();
+
         }
-        if updates.lastName is () {} else {
-            updateDoc.lastName = updates.lastName;
+
+        if updates.lastName is string lastNameUpdate {
+
+            updateDoc.lastName = lastNameUpdate.trim();
+
         }
-        if updates.phone is () {} else {
-            updateDoc.phone = updates.phone;
+
+        if updates.phone is string phoneUpdate {
+
+            updateDoc.phone = phoneUpdate.trim();
+
         }
+
         updateDoc.updatedAt = time:utcToString(time:utcNow());
-        
-        // Update in database
-        _ = check passengerDB->update(
-            `{"_id": "${id}"}`, 
-            `{"$set": ${updateDoc.toJsonString()}}`
-        );
-        
-        // Fetch updated passenger
-        Passenger? updatedPassenger = check passengerDB->findById(id, Passenger);
-        
+
+
+
+        var updateResult = passengerDB->update(`{"_id": "${id}"}`, `{"$set": ${updateDoc.toJsonString()}}`);
+
+        if updateResult is error {
+
+            log:printError("Failed to update passenger profile", 'error = updateResult, passengerId = id);
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Unable to update profile");
+
+        }
+
+
+
+        var refreshedPassengerResult = passengerDB->findById(id, Passenger);
+
+        if refreshedPassengerResult is error {
+
+            log:printError("Failed to reload passenger profile after update", 'error = refreshedPassengerResult, passengerId = id);
+
+            return prepareErrorResponse(http:INTERNAL_SERVER_ERROR, "Unable to load updated profile");
+
+        }
+
+
+
+        Passenger? updatedPassengerOpt = refreshedPassengerResult;
+
+        if updatedPassengerOpt is () {
+
+            return http:NOT_FOUND;
+
+        }
+
+
+
+        Passenger updatedPassenger = updatedPassengerOpt;
+
+
+
         return {
+
             id: updatedPassenger.id,
+
             firstName: updatedPassenger.firstName,
+
             lastName: updatedPassenger.lastName,
+
             email: updatedPassenger.email,
+
             phone: updatedPassenger.phone,
+
             balance: updatedPassenger.balance,
+
             status: updatedPassenger.status,
+
             createdAt: updatedPassenger.createdAt
+
         };
+
     }
+
+
 
     // Health check endpoint
     resource function get health() returns json {
