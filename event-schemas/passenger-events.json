@@ -1,0 +1,9 @@
+{
+  "eventType": "PASSENGER_REGISTERED",
+  "timestamp": "2025-10-04T20:30:00Z",
+  "data": {
+    "passengerId": "123",
+    "name": "John Alex",
+    "email": "john@example.com"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "eventType": "TicketCreated",
+  "timestamp": "2025-10-04T15:30:00Z",
+  "data": {
+    "ticketId": "T12345",
+    "passengerId": "P1001",
+    "tripId": "TRP2025-001",
+    "status": "CREATED",
+    "price": 50.0
+  }
+}

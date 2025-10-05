@@ -1,0 +1,10 @@
+{
+  "eventType": "TripUpdated",
+  "timestamp": "2025-10-04T16:00:00Z",
+  "data": {
+    "tripId": "TRP2025-001",
+    "route": "Khomasdal → Windhoek West",
+    "status": "DELAYED",
+    "delayMinutes": 30
+  }
+}

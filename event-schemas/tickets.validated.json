@@ -1,0 +1,11 @@
+{
+  "event": "tickets.validated",
+  "producer": "validation-service",
+  "consumer": ["notification-service", "admin-service"],
+  "schema": {
+    "ticketId": "string",
+    "validatorId": "string",
+    "tripId": "string",
+    "validatedAt": "ISODate"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "event": "notifications.sent",
+  "producer": "notification-service",
+  "consumer": "none",
+  "schema": {
+    "userId": "string",
+    "message": "string",
+    "type": "string",
+    "sentAt": "ISODate"
+  }
+}

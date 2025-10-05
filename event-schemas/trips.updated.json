@@ -1,0 +1,11 @@
+{
+  "event": "trips.updated",
+  "producer": "transport-service",
+  "consumer": ["notification-service", "passenger-service"],
+  "schema": {
+    "tripId": "string",
+    "routeId": "string",
+    "status": "string",
+    "updatedAt": "ISODate"
+  }
+}

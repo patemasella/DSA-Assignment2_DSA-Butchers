@@ -1,0 +1,12 @@
+{
+  "event": "tickets.created",
+  "producer": "ticketing-service",
+  "consumer": ["notification-service", "admin-service"],
+  "schema": {
+    "ticketId": "string",
+    "userId": "string",
+    "tripId": "string",
+    "status": "string",
+    "createdAt": "ISODate"
+  }
+}

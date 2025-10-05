@@ -1,0 +1,12 @@
+{
+  "event": "payments.confirmed",
+  "version": 1,
+  "producer": "payment-service",
+  "consumer": "ticketing-service",
+  "schema": {
+    "paymentId": "string",
+    "userId": "string",
+    "status": "string", 
+    "confirmedAt": "ISODate"
+  }
+}

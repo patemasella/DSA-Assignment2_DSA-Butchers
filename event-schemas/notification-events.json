@@ -1,0 +1,8 @@
+{
+  "eventType": "TicketValidatedNotification",
+  "timestamp": "2025-10-04T16:15:00Z",
+  "data": {
+    "passengerId": "P1001",
+    "message": "Your ticket T12345 has been successfully validated."
+  }
+}

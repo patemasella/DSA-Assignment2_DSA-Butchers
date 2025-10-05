@@ -1,0 +1,11 @@
+{
+  "eventType": "PaymentConfirmed",
+  "timestamp": "2025-10-04T15:31:20Z",
+  "data": {
+    "paymentId": "PAY001",
+    "ticketId": "T12345",
+    "amount": 50.0,
+    "method": "CreditCard",
+    "status": "SUCCESS"
+  }
+}

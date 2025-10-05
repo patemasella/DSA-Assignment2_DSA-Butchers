@@ -1,0 +1,14 @@
+{
+  "event": "payments.requested",
+  "version": 1,
+  "producer": "ticketing-service",
+  "consumer": "payment-service",
+  "schema": {
+    "paymentRequestId": "string",
+    "userId": "string",
+    "amount": "number",
+    "currency": "string",
+    "ticketType": "string",
+    "timestamp": "ISODate"
+  }
+}
