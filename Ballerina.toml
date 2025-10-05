@@ -1,0 +1,12 @@
+[package]
+org = "transport_system"
+name = "transport_service"
+version = "0.1.0"
+
+[dependencies]
+"ballerinax/postgresql" = { version = "1.16.0" }
+"ballerina/http" = { version = "2.11.0" }
+"ballerina/jwt" = { version = "2.11.0" }
+
+[build-options]
+observabilityIncluded = true

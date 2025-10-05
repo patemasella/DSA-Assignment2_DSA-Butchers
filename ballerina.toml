@@ -1,0 +1,14 @@
+[package]
+org = "dolorer"
+name = "transport_system"
+version = "1.0.0"
+
+[[platform.java11.dependency]]
+groupId = "io.ballerina.stdlib"
+artifactId = "postgresql-native"
+version = "1.0.0"
+
+[[platform.java11.dependency]]
+groupId = "org.postgresql"
+artifactId = "postgresql"
+version = "42.2.18"

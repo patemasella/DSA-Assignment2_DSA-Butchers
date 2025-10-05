@@ -1,0 +1,19 @@
+[admin_service]
+port = 8085
+
+[database]
+host = "localhost"
+port = 5432
+username = "transport_user"
+password = "transport_password"
+database = "transport_system"
+poolOptions = { maxOpenConnections = 10 }
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+trip_events_topic = "trip-events"
+vehicle_updates_topic = "vehicle-updates"
+
+[transport]
+location_update_interval = 30  # seconds
+auto_complete_delay = 3600     # 1 hour after scheduled arrival

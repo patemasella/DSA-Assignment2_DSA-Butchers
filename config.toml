@@ -1,0 +1,27 @@
+# Database Configuration
+[transport_db]
+host = "postgres"
+port = 5432
+name = "transport_ticketing"
+username = "transport_user"
+password = "your_secure_password"
+poolOptions.maxOpenConnections = 50
+
+# Kafka Configuration
+[kafka]
+bootstrap_servers = "kafka:9092"
+
+# Service Ports
+[ports]
+passenger_service = 8081
+transport_service = 8082
+ticketing_service = 8083
+payment_service = 8084
+notification_service = 8085
+admin_service = 8086
+gateway = 8080
+
+# JWT Configuration for Authentication
+[jwt]
+secret_key = "your-jwt-secret-key"
+issuer = "transport-ticketing-system"

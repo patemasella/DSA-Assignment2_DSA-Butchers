@@ -1,84 +1,283 @@
-version: '3.9'
+version: '3.8'
 
 services:
-  # -----------------------------
-  # ZooKeeper (Kafka dependency)
-  # -----------------------------
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.4.0
-    container_name: zookeeper
+  # Database
+  postgres:
+    image: postgres:15
+    container_name: transport_db
+    environment:
+      POSTGRES_DB: transport_system
+      POSTGRES_USER: transport_user
+      POSTGRES_PASSWORD: transport_password
     ports:
-      - "2181:2181"
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - transport_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transport_user -d transport_system"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Message Broker
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - transport_network
     restart: unless-stopped
 
-  # -----------------------------
-  # Kafka Broker
-  # -----------------------------
   kafka:
-    image: confluentinc/cp-kafka:7.4.0
+    image: confluentinc/cp-kafka:latest
     container_name: kafka
     depends_on:
       - zookeeper
-    ports:
-      - "9093:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-    volumes:
-      - ./kafka/create-topics.sh:/create-topics.sh
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9092:9092"
+    networks:
+      - transport_network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server kafka:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  kafka-topics-setup:
+    image: confluentinc/cp-kafka:latest
+    container_name: kafka_topics_setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - transport_network
     command: >
       bash -c "
-        /etc/confluent/docker/run &
-        sleep 20 &&
-        bash /create-topics.sh &&
-        wait
+        echo 'Waiting for Kafka to be ready...' &&
+        sleep 30 &&
+        kafka-topics --bootstrap-server kafka:9092 --create --topic payment-events --partitions 3 --replication-factor 1 --if-not-exists &&
+        kafka-topics --bootstrap-server kafka:9092 --create --topic ticket-events --partitions 3 --replication-factor 1 --if-not-exists &&
+        kafka-topics --bootstrap-server kafka:9092 --create --topic trip-events --partitions 3 --replication-factor 1 --if-not-exists &&
+        kafka-topics --bootstrap-server kafka:9092 --create --topic vehicle-updates --partitions 3 --replication-factor 1 --if-not-exists &&
+        kafka-topics --bootstrap-server kafka:9092 --create --topic notifications --partitions 3 --replication-factor 1 --if-not-exists &&
+        kafka-topics --bootstrap-server kafka:9092 --create --topic admin-notifications --partitions 3 --replication-factor 1 --if-not-exists &&
+        echo 'Kafka topics created successfully!' &&
+        kafka-topics --bootstrap-server kafka:9092 --list
       "
-    restart: unless-stopped
+    restart: on-failure
 
-  # -----------------------------
-  # Microsoft SQL Server (ticketingDB)
-  # -----------------------------
-  mssql:
-    image: mcr.microsoft.com/azure-sql-edge:latest
-    container_name: mssql
+  # Microservices
+  admin_service:
+    image: admin-service
+    container_name: admin_service
+    build:
+      context: ./admin_service
+      dockerfile: Dockerfile
     ports:
-      - "1435:1433"
+      - "8085:8085"
     environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "YourStrong!Passw0rd"
-    volumes:
-      - ./mssql-data:/var/opt/mssql
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=transport_user
+      - DB_PASSWORD=transport_password
+      - DB_NAME=transport_system
+      - JWT_SECRET=admin-secret-key-2024-transport-system
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - transport_network
     healthcheck:
-      test: ["CMD", "sqlcmd", "-S", "localhost", "-U", "sa", "-P", "YourStrong!Passw0rd", "-Q", "SELECT 1"]
-      interval: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:8085/admin/health"]
+      interval: 30s
       timeout: 10s
-      retries: 5
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
 
-  # -----------------------------
-  # MongoDB (optional microservice DB)
-  # -----------------------------
-  mongo:
-    image: mongo:6
-    container_name: mongo
+  passenger_service:
+    image: passenger-service
+    container_name: passenger_service
+    build:
+      context: ./passenger_service
+      dockerfile: Dockerfile
     ports:
-      - "27017:27017"
-    volumes:
-      - ./mongo-data:/data/db
+      - "8080:8080"
     environment:
-      MONGO_INITDB_DATABASE: smart_ticketing
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=transport_user
+      - DB_PASSWORD=transport_password
+      - DB_NAME=transport_system
+      - JWT_SECRET=passenger-secret-key-2024
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - transport_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/passenger/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
 
-# -----------------------------
-# Optional network (for isolation)
-# -----------------------------
+  transport_service:
+    image: transport-service
+    container_name: transport_service
+    build:
+      context: ./transport_service
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=transport_user
+      - DB_PASSWORD=transport_password
+      - DB_NAME=transport_system
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - transport_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/transport/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  ticketing_service:
+    image: ticketing-service
+    container_name: ticketing_service
+    build:
+      context: ./ticketing_service
+      dockerfile: Dockerfile
+    ports:
+      - "8084:8084"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=transport_user
+      - DB_PASSWORD=transport_password
+      - DB_NAME=transport_system
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - QR_CODE_SECRET=ticketing-secret-key-2024
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - transport_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/ticketing/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  payment_service:
+    image: payment-service
+    container_name: payment_service
+    build:
+      context: ./payment_service
+      dockerfile: Dockerfile
+    ports:
+      - "8083:8083"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=transport_user
+      - DB_PASSWORD=transport_password
+      - DB_NAME=transport_system
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - PAYMENT_SUCCESS_RATE=0.95
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - transport_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/payment/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  notification_service:
+    image: notification-service
+    container_name: notification_service
+    build:
+      context: ./notification_service
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=transport_user
+      - DB_PASSWORD=transport_password
+      - DB_NAME=transport_system
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - SMTP_HOST=smtp.gmail.com
+      - SMTP_PORT=587
+      - SMTP_USERNAME=your-email@gmail.com
+      - SMTP_PASSWORD=your-app-password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - transport_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/notification/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  mongodb_data:
+
 networks:
-  default:
-    name: smart-ticketing-network
+  transport_network:
+    driver: bridge
