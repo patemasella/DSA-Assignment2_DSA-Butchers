@@ -12,6 +12,7 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    restart: unless-stopped
 
   # -----------------------------
   # Kafka Broker
@@ -39,6 +40,7 @@ services:
         bash /create-topics.sh &&
         wait
       "
+    restart: unless-stopped
 
   # -----------------------------
   # Microsoft SQL Server (ticketingDB)
@@ -58,6 +60,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
+    restart: unless-stopped
 
   # -----------------------------
   # MongoDB (optional microservice DB)
@@ -71,3 +74,11 @@ services:
       - ./mongo-data:/data/db
     environment:
       MONGO_INITDB_DATABASE: smart_ticketing
+    restart: unless-stopped
+
+# -----------------------------
+# Optional network (for isolation)
+# -----------------------------
+networks:
+  default:
+    name: smart-ticketing-network
